@@ -1,1339 +1,655 @@
 "use client"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { FolderKanban, Check, X, Eye, Plus, Edit, Trash2, Pause, ArchiveIcon, Users } from "lucide-react"
+import { Users, UserPlus, UserCheck } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useEffect, useState } from "react"
-import { collection, getDocs, doc, updateDoc, addDoc, Timestamp, query, where, getDoc } from "firebase/firestore"
-import { getFirebaseDb } from "@/lib/firebase/config"
-import { Progress } from "@/components/ui/progress"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { toast } from "sonner"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+  collection,
+  getDocs,
+  query,
+  where,
+  updateDoc,
+  doc,
+  setDoc,
+  getDoc,
+  Timestamp,
+} from "firebase/firestore"
+import { db } from "@/lib/firebase/config"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { coordinatorSidebarItems } from "@/lib/constants/coordinator-sidebar"
-import { useSearchParams } from "next/navigation"
-import { AdvancedSearch, type SearchFilters } from "@/components/search/advanced-search"
-import { filterProjects } from "@/lib/utils/search-utils"
-import { getDepartments, type Department } from "@/lib/utils/department-helper"
-import { calculateProjectProgress } from "@/lib/utils/grading"
+import { Input } from "@/components/ui/input"
+import { toast } from "sonner"
+import { useAuth } from "@/lib/contexts/auth-context"
 import { useLanguage } from "@/lib/contexts/language-context"
+import { createUserWithEmailAndPassword } from "firebase/auth"
+import { auth } from "@/lib/firebase/config"
+import { coordinatorSidebarItems } from "@/lib/constants/coordinator-sidebar"
 
-export default function CoordinatorProjects() {
-  const { t, language } = useLanguage()
+type AnyDoc = Record<string, any>
 
-  // ✅ Firestore DB must be initialized on client only
-  const [db, setDb] = useState<any>(null)
-
-  const [projects, setProjects] = useState<any[]>([])
+export default function CoordinatorStudents() {
+  const { loading: authLoading } = useAuth()
+  const { t } = useLanguage()
+  const [stats, setStats] = useState({
+    totalProjects: 0,
+    activeProjects: 0,
+    completedProjects: 0,
+    totalSupervisors: 0,
+    totalStudents: 0,
+    averageProgress: 0,
+    projectsNeedingAttention: 0,
+  })
+  const [students, setStudents] = useState<AnyDoc[]>([])
+  const [supervisors, setSupervisors] = useState<AnyDoc[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedProject, setSelectedProject] = useState<any>(null)
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [projectToDelete, setProjectToDelete] = useState<any>(null)
-  const [isTeamManagementOpen, setIsTeamManagementOpen] = useState(false)
-  const [projectTeamMembers, setProjectTeamMembers] = useState<any[]>([])
-  const [selectedStudentToAdd, setSelectedStudentToAdd] = useState("")
-  const [supervisors, setSupervisors] = useState<any[]>([])
-  const [students, setStudents] = useState<any[]>([])
-  const [searchFilters, setSearchFilters] = useState<SearchFilters>({ searchText: "" })
-  const [departments, setDepartments] = useState<Department[]>([])
-  const [isUpdating, setIsUpdating] = useState(false)
-  const [newProject, setNewProject] = useState({
-    title: "",
-    description: "",
-    supervisorId: "",
-    studentId: "",
+  const [selectedStudent, setSelectedStudent] = useState<AnyDoc | null>(null)
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState("")
+  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false)
+  const [isAddStudentDialogOpen, setIsAddStudentDialogOpen] = useState(false)
+  const [departments, setDepartments] = useState<AnyDoc[]>([])
+  const [newStudent, setNewStudent] = useState({
+    name: "",
+    email: "",
+    password: "",
+    studentId: "", // رقم جامعي
     department: "",
-    startDate: "",
-    endDate: "",
+    phone: "",
   })
 
-  const searchParams = useSearchParams()
-  const createFromIdeaId = searchParams.get("createFrom")
+  const [isConfirmChangeOpen, setIsConfirmChangeOpen] = useState(false)
+  const [pendingSupervisorId, setPendingSupervisorId] = useState("")
+  const [currentSupervisorName, setCurrentSupervisorName] = useState("")
+  const [targetSupervisorName, setTargetSupervisorName] = useState("")
 
-  useEffect(() => {
-    setDb(getFirebaseDb())
-  }, [])
-
-  const fetchProjects = async () => {
-    if (!db) return
+  const fetchData = async () => {
     try {
-      const projectsSnapshot = await getDocs(collection(db, "projects"))
-      const projectsData = projectsSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+      setLoading(true)
 
-      const updatedProjects = await Promise.all(
-        projectsData.map(async (project: any) => {
-          try {
-            const tasksQuery = query(collection(db, "tasks"), where("projectId", "==", project.id))
-            const tasksSnapshot = await getDocs(tasksQuery)
-            const tasks = tasksSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
+      const studentsQuery = query(collection(db, "users"), where("role", "==", "student"))
+      const studentsSnapshot = await getDocs(studentsQuery)
+      const studentsData = studentsSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
 
-            const progress = calculateProjectProgress(tasks as any[])
+      const supervisorsQuery = query(collection(db, "users"), where("role", "==", "supervisor"))
+      const supervisorsSnapshot = await getDocs(supervisorsQuery)
+      const supervisorsData = supervisorsSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
 
-            if (progress !== project.progress) {
-              await updateDoc(doc(db, "projects", project.id), { progress })
-            }
+      const departmentsQuery = query(collection(db, "departments"), where("isActive", "==", true))
+      const departmentsSnapshot = await getDocs(departmentsQuery)
+      const departmentsData = departmentsSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
+      setDepartments(departmentsData)
 
-            return { ...project, progress }
-          } catch (error) {
-            console.error(`Error calculating progress for project ${project.id}:`, error)
-            return project
-          }
+      const supervisorsWithCounts = await Promise.all(
+        supervisorsData.map(async (supervisor) => {
+          const studentCount = studentsData.filter((s) => s.supervisorId === supervisor.id).length
+          return { ...supervisor, studentCount }
         }),
       )
 
-      setProjects(updatedProjects)
+      setStudents(studentsData)
+      setSupervisors(supervisorsWithCounts)
     } catch (error) {
-      console.error("Error fetching projects:", error)
-      toast.error(t("errorLoadingProjectsMsg"))
+      console.error("Error fetching data:", error)
+      toast.error(t("errorLoadingData"))
     } finally {
       setLoading(false)
     }
   }
 
-  const fetchSupervisorsAndStudents = async () => {
-    if (!db) return
-    try {
-      const supervisorsQuery = query(collection(db, "users"), where("role", "==", "supervisor"))
-      const supervisorsSnapshot = await getDocs(supervisorsQuery)
-      setSupervisors(supervisorsSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })))
+  useEffect(() => {
+    fetchData()
+  }, [])
 
-      const studentsQuery = query(collection(db, "users"), where("role", "==", "student"))
-      const studentsSnapshot = await getDocs(studentsQuery)
-      setStudents(studentsSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })))
-    } catch (error) {
-      console.error("Error fetching users:", error)
+  // ✅ Helper: get real Firebase UID for a team member object (by email OR university studentId)
+  const resolveUserUidFromMember = async (member: any): Promise<string | null> => {
+    try {
+      const email = typeof member?.email === "string" ? member.email.trim().toLowerCase() : ""
+      const uniStudentId = typeof member?.studentId === "string" ? member.studentId.trim() : ""
+
+      // 1) Try by email
+      if (email) {
+        const q1 = query(collection(db, "users"), where("email", "==", email))
+        const snap1 = await getDocs(q1)
+        if (!snap1.empty) return snap1.docs[0].id
+      }
+
+      // 2) Try by university studentId (field name in users is also studentId)
+      if (uniStudentId) {
+        const q2 = query(collection(db, "users"), where("studentId", "==", uniStudentId))
+        const snap2 = await getDocs(q2)
+        if (!snap2.empty) return snap2.docs[0].id
+      }
+
+      return null
+    } catch (e) {
+      console.error("resolveUserUidFromMember error:", e)
+      return null
     }
   }
 
-  const fetchDepartments = async () => {
-    const depts = await getDepartments()
-    setDepartments(depts)
-  }
-
-  const loadProjectTeamMembers = async (projectId: string) => {
-    if (!db) return
-    try {
-      const studentsQuery = query(
-        collection(db, "users"),
-        where("projectId", "==", projectId),
-        where("role", "==", "student"),
-      )
-      const studentsSnapshot = await getDocs(studentsQuery)
-      const members = studentsSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
-      setProjectTeamMembers(members)
-    } catch (error) {
-      console.error("Error loading team members:", error)
-      toast.error(t("errorLoadingTeamMembersMsg"))
+  const handleAssignSupervisor = async () => {
+    if (!selectedStudent || !selectedSupervisorId) {
+      toast.error(t("pleaseSelectSupervisor"))
+      return
     }
-  }
 
-  const handleAddStudentToProject = async () => {
-    if (!db) return
-    if (!selectedStudentToAdd || !selectedProject) {
-      toast.error(t("pleaseSelectStudentMsg"))
+    const oldSupervisorId = selectedStudent.supervisorId || ""
+    const hasProject = !!selectedStudent.projectId
+    const isChangingSupervisor = oldSupervisorId && oldSupervisorId !== selectedSupervisorId
+
+    if ((hasProject || isChangingSupervisor) && !isConfirmChangeOpen) {
+      const oldName = supervisors.find((s) => s.id === oldSupervisorId)?.name || t("notSpecified")
+      const newName = supervisors.find((s) => s.id === selectedSupervisorId)?.name || t("notSpecified")
+
+      setCurrentSupervisorName(oldSupervisorId ? oldName : t("None"))
+      setTargetSupervisorName(newName)
+      setPendingSupervisorId(selectedSupervisorId)
+      setIsConfirmChangeOpen(true)
       return
     }
 
     try {
-      const student = students.find((s) => s.id === selectedStudentToAdd)
+      const supervisorToApply = pendingSupervisorId || selectedSupervisorId
 
-      if (student?.projectId) {
-        toast.error(t("studentAlreadyHasProjectMsg"))
-        return
-      }
-
-      await updateDoc(doc(db, "users", selectedStudentToAdd), {
-        projectId: selectedProject.id,
-        supervisorId: selectedProject.supervisorId,
+      // ✅ Update selected student's supervisor
+      await updateDoc(doc(db, "users", selectedStudent.id), {
+        supervisorId: supervisorToApply,
+        updatedAt: Timestamp.now(),
       })
 
-      const currentMembers = selectedProject.teamMembers || []
-      await updateDoc(doc(db, "projects", selectedProject.id), {
-        teamMembers: [...currentMembers, selectedStudentToAdd],
-        isTeamProject: true,
-      })
+      // ✅ Find the project - either by projectId on the student, OR by searching studentIds array
+      let projectData: any = null
+      let projectRef: any = null
 
-      toast.success(t("studentAddedToProjectSuccess"))
-      setSelectedStudentToAdd("")
-      loadProjectTeamMembers(selectedProject.id)
-      fetchProjects()
-    } catch (error) {
-      console.error("Error adding student to project:", error)
-      toast.error(t("errorAddingStudentMsg"))
-    }
-  }
-
-  const handleRemoveStudentFromProject = async (studentId: string) => {
-    if (!db) return
-    if (!selectedProject) return
-
-    try {
-      await updateDoc(doc(db, "users", studentId), {
-        projectId: null,
-        supervisorId: null,
-      })
-
-      const currentMembers = selectedProject.teamMembers || []
-      const updatedMembers = currentMembers.filter((id: string) => id !== studentId)
-
-      await updateDoc(doc(db, "projects", selectedProject.id), {
-        teamMembers: updatedMembers,
-        isTeamProject: updatedMembers.length > 1,
-      })
-
-      toast.success(t("studentRemovedFromProject"))
-      loadProjectTeamMembers(selectedProject.id)
-      fetchProjects()
-    } catch (error) {
-      console.error("Error removing student from project:", error)
-      toast.error(t("errorRemovingStudentMsg"))
-    }
-  }
-
-  useEffect(() => {
-    if (!db) return
-
-    const loadApprovedIdea = async () => {
-      if (createFromIdeaId) {
-        try {
-          const ideaDoc = await getDoc(doc(db, "projectIdeas", createFromIdeaId))
-          if (ideaDoc.exists()) {
-            const ideaData: any = ideaDoc.data()
-            setNewProject({
-              title: ideaData.title || "",
-              description: ideaData.description || "",
-              supervisorId: "",
-              studentId: ideaData.studentId || "",
-              department: ideaData.department || "",
-              startDate: "",
-              endDate: "",
-            })
-            setIsAddDialogOpen(true)
-            toast.info(t("ideaDataLoadedMsg"))
-          }
-        } catch (error) {
-          console.error("Error loading approved idea:", error)
-          toast.error(t("errorLoadingIdeaDataMsg"))
+      if (selectedStudent.projectId) {
+        const pRef = doc(db, "projects", selectedStudent.projectId)
+        const pDoc = await getDoc(pRef)
+        if (pDoc.exists()) {
+          projectData = pDoc.data()
+          projectRef = pRef
         }
       }
+
+      // ✅ Bug fix: if no project found via projectId, search by studentIds (leader case)
+      if (!projectData) {
+        const projectsQuery = query(
+          collection(db, "projects"),
+          where("studentIds", "array-contains", selectedStudent.id)
+        )
+        const projectsSnap = await getDocs(projectsQuery)
+        if (!projectsSnap.empty) {
+          projectRef = projectsSnap.docs[0].ref
+          projectData = projectsSnap.docs[0].data()
+        }
+      }
+
+      if (projectData && projectRef) {
+        // Update project supervisor
+        await updateDoc(projectRef, {
+          supervisorId: supervisorToApply,
+          updatedAt: Timestamp.now(),
+        })
+
+        // ✅ Update ALL team members' supervisorId + projectId
+        const rawMembers = projectData.teamMembers
+        const projectId = projectRef.id
+
+        if (Array.isArray(rawMembers) && rawMembers.length > 0) {
+          const resolvedUids: string[] = []
+
+          for (const m of rawMembers) {
+            const uid = await resolveUserUidFromMember(m)
+            if (uid) resolvedUids.push(uid)
+          }
+
+          const uniqueUids = Array.from(new Set(resolvedUids))
+
+          if (uniqueUids.length > 0) {
+            await Promise.all(
+              uniqueUids.map((uid) =>
+                setDoc(
+                  doc(db, "users", uid),
+                  { supervisorId: supervisorToApply, projectId, updatedAt: Timestamp.now() },
+                  { merge: true },
+                ),
+              ),
+            )
+          } else {
+            console.warn("No team member UIDs resolved from teamMembers:", rawMembers)
+          }
+        }
+      }
+
+      toast.success(t("supervisorAssignedSuccessfully"))
+      setIsAssignDialogOpen(false)
+      setIsConfirmChangeOpen(false)
+      setPendingSupervisorId("")
+      setCurrentSupervisorName("")
+      setTargetSupervisorName("")
+      setSelectedStudent(null)
+      setSelectedSupervisorId("")
+      fetchData()
+    } catch (error) {
+      console.error("Error assigning supervisor:", error)
+      toast.error(t("errorAssigningSupervisor"))
     }
+  }
 
-    fetchProjects()
-    fetchSupervisorsAndStudents()
-    fetchDepartments()
-    loadApprovedIdea()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, createFromIdeaId])
-
-  const handleAddProject = async () => {
-    if (!db) return
-    if (!newProject.title || !newProject.description || !newProject.supervisorId || !newProject.department || !newProject.startDate) {
-      toast.error(t("fillRequiredFields"))
+  const handleAddStudent = async () => {
+    if (
+      !newStudent.name ||
+      !newStudent.email ||
+      !newStudent.password ||
+      !newStudent.studentId ||
+      !newStudent.department ||
+      !newStudent.phone
+    ) {
+      toast.error(t("pleaseFillAllRequiredFields"))
       return
     }
 
     try {
-      const supervisor = supervisors.find((s) => s.id === newProject.supervisorId)
-      const student = students.find((s) => s.id === newProject.studentId)
+      const userCredential = await createUserWithEmailAndPassword(auth, newStudent.email, newStudent.password)
 
-      const normalizedStudentId =
-        newProject.studentId && newProject.studentId !== "none" ? newProject.studentId : null
-
-      const projectData: any = {
-        title: newProject.title,
-        description: newProject.description,
-        supervisorId: newProject.supervisorId,
-        supervisorName: supervisor?.name || "",
-        studentId: normalizedStudentId,
-        studentName: normalizedStudentId ? (student?.name || "") : "",
-        department: newProject.department,
-        status: "active",
-        progress: 0,
+      await setDoc(doc(db, "users", userCredential.user.uid), {
+        uid: userCredential.user.uid,
+        name: newStudent.name,
+        email: newStudent.email.trim().toLowerCase(),
+        studentId: newStudent.studentId, // رقم جامعي
+        department: newStudent.department,
+        phone: newStudent.phone,
+        role: "student",
         createdAt: Timestamp.now(),
-        startDate: Timestamp.fromDate(new Date(newProject.startDate)),
-      }
+        updatedAt: Timestamp.now(),
+      })
 
-      if (newProject.endDate) {
-        projectData.endDate = Timestamp.fromDate(new Date(newProject.endDate))
-      }
-
-      const projectRef = await addDoc(collection(db, "projects"), projectData)
-
-      if (normalizedStudentId) {
-        await updateDoc(doc(db, "users", normalizedStudentId), {
-          supervisorId: newProject.supervisorId,
-          projectId: projectRef.id,
-        })
-      }
-
-      if (createFromIdeaId) {
-        await updateDoc(doc(db, "projectIdeas", createFromIdeaId), {
-          supervisorId: newProject.supervisorId,
-          projectId: projectRef.id,
-        })
-      }
-
-      toast.success(t("projectAddedSuccess"))
-      setIsAddDialogOpen(false)
-      setNewProject({
-        title: "",
-        description: "",
-        supervisorId: "",
+      toast.success(t("studentAddedSuccessfully"))
+      setIsAddStudentDialogOpen(false)
+      setNewStudent({
+        name: "",
+        email: "",
+        password: "",
         studentId: "",
         department: "",
-        startDate: "",
-        endDate: "",
+        phone: "",
       })
-
-      if (createFromIdeaId) {
-        window.history.pushState({}, "", "/coordinator/projects")
+      fetchData()
+    } catch (error: any) {
+      console.error("Error adding student:", error)
+      if (error.code === "auth/email-already-in-use") {
+        toast.error(t("emailAlreadyInUse"))
+      } else {
+        toast.error(t("errorAddingStudent"))
       }
-
-      fetchProjects()
-    } catch (error) {
-      console.error("Error adding project:", error)
-      toast.error(t("errorAddingProjectMsg"))
     }
   }
 
-  const handleApproveProject = async (projectId: string) => {
-    if (!db) return
-    try {
-      await updateDoc(doc(db, "projects", projectId), {
-        status: "active",
-        approvedAt: new Date(),
-      })
-      toast.success(t("projectAcceptedSuccess"))
-      fetchProjects()
-    } catch (error) {
-      console.error("Error approving project:", error)
-      toast.error(t("errorAcceptingProject"))
-    }
+  const openAssignDialog = (student: AnyDoc) => {
+    setSelectedStudent(student)
+    setSelectedSupervisorId(student.supervisorId || "")
+    setIsAssignDialogOpen(true)
   }
 
-  const handleRejectProject = async (projectId: string) => {
-    if (!db) return
-    try {
-      await updateDoc(doc(db, "projects", projectId), {
-        status: "rejected",
-        rejectedAt: new Date(),
-      })
-      toast.success(t("projectRejectedMsg"))
-      fetchProjects()
-    } catch (error) {
-      console.error("Error rejecting project:", error)
-      toast.error(t("errorRejectingProjectMsg"))
-    }
-  }
-
-  const handleSuspendProject = async (projectId: string) => {
-    if (!db) return
-    try {
-      await updateDoc(doc(db, "projects", projectId), {
-        status: "suspended",
-        suspendedAt: Timestamp.now(),
-      })
-      toast.success(t("projectStoppedMsg"))
-      fetchProjects()
-    } catch (error) {
-      console.error("Error suspending project:", error)
-      toast.error(t("errorStoppingProject"))
-    }
-  }
-
-  const handleArchiveProject = async (projectId: string) => {
-    if (!db) return
-    try {
-      await updateDoc(doc(db, "projects", projectId), {
-        status: "archived",
-        archivedAt: Timestamp.now(),
-      })
-      toast.success(t("projectArchivedMsg"))
-      fetchProjects()
-    } catch (error) {
-      console.error("Error archiving project:", error)
-      toast.error(t("errorArchivingProjectMsg"))
-    }
-  }
-
-  // ✅ Bug fix: restore archived project back to active
-  const handleRestoreProject = async (projectId: string) => {
-    if (!db) return
-    try {
-      await updateDoc(doc(db, "projects", projectId), {
-        status: "active",
-        archivedAt: null,
-      })
-      toast.success(language === "ar" ? "تم استعادة المشروع بنجاح" : "Project restored successfully")
-      fetchProjects()
-    } catch (error) {
-      console.error("Error restoring project:", error)
-      toast.error(language === "ar" ? "حدث خطأ أثناء استعادة المشروع" : "Error restoring project")
-    }
-  }
-
-  const handleUpdateProject = async () => {
-    if (!db) return
-    if (!selectedProject || !selectedProject.title) {
-      toast.error(t("fillRequiredFields"))
-      return
-    }
-
-    if (isUpdating) return
-    setIsUpdating(true)
-
-    try {
-      const supervisor = supervisors.find((s) => s.id === selectedProject.supervisorId)
-      const student = students.find((s) => s.id === selectedProject.studentId)
-
-      const normalizedStudentId =
-        selectedProject.studentId && selectedProject.studentId !== "none" ? selectedProject.studentId : null
-
-      const updateData: any = {
-        title: selectedProject.title,
-        description: selectedProject.description,
-        supervisorId: selectedProject.supervisorId,
-        supervisorName: supervisor?.name || "",
-        studentId: normalizedStudentId,
-        studentName: normalizedStudentId ? (student?.name || "") : "",
-        department: selectedProject.department,
-        updatedAt: Timestamp.now(),
-      }
-
-      if (selectedProject.startDate && typeof selectedProject.startDate === "string") {
-        updateData.startDate = Timestamp.fromDate(new Date(selectedProject.startDate))
-      }
-
-      if (selectedProject.endDate && typeof selectedProject.endDate === "string") {
-        updateData.endDate = Timestamp.fromDate(new Date(selectedProject.endDate))
-      }
-
-      await updateDoc(doc(db, "projects", selectedProject.id), updateData)
-
-      const rawTeamMembers = selectedProject.teamMembers || selectedProject.studentIds || []
-      const teamMemberIds = (Array.isArray(rawTeamMembers) ? rawTeamMembers : [])
-        .map((m: any) => (typeof m === "string" ? m : m?.id || m?.uid || m?.studentId))
-        .filter((id: any) => typeof id === "string" && id.trim().length > 0 && id !== "none")
-
-      const allStudentIds = new Set<string>()
-      if (normalizedStudentId) allStudentIds.add(normalizedStudentId)
-      teamMemberIds.forEach((id: string) => allStudentIds.add(id))
-
-      if (allStudentIds.size > 0 && selectedProject.supervisorId) {
-        await Promise.all(
-          Array.from(allStudentIds).map((sid) =>
-            updateDoc(doc(db, "users", sid), {
-              supervisorId: selectedProject.supervisorId,
-              projectId: selectedProject.id,
-            }),
-          ),
-        )
-      }
-
-      toast.success(t("projectUpdatedSuccess"))
-      setIsEditDialogOpen(false)
-      setSelectedProject(null)
-      fetchProjects()
-    } catch (error) {
-      console.error("Error updating project:", error)
-      toast.error(t("errorUpdatingProjectMsg"))
-    } finally {
-      setIsUpdating(false)
-    }
-  }
-
-  const handleDeleteProject = async () => {
-    if (!db) return
-    if (!projectToDelete) return
-
-    try {
-      const projectRef = doc(db, "projects", projectToDelete.id)
-
-      const projectSnap = await getDoc(projectRef)
-      if (projectSnap.exists()) {
-        const projectData: any = projectSnap.data()
-        const studentUids: string[] = []
-        if (projectData.studentId) studentUids.push(projectData.studentId)
-        if (Array.isArray(projectData.studentIds)) studentUids.push(...projectData.studentIds)
-        if (Array.isArray(projectData.teamMembers)) studentUids.push(...projectData.teamMembers)
-
-        const normalizedUids = studentUids
-          .map((m: any) => (typeof m === "string" ? m : m?.id || m?.uid || m?.studentId))
-          .filter((id: any) => typeof id === "string" && id.trim().length > 0 && id !== "none")
-
-        if (normalizedUids.length > 0) {
-          await Promise.all(
-            [...new Set(normalizedUids)].map((uid) =>
-              updateDoc(doc(db, "users", uid), {
-                projectId: null,
-                updatedAt: Timestamp.now(),
-              }).catch(() => {}),
-            ),
-          )
-        }
-      }
-
-      await updateDoc(projectRef, {
-        status: "deleted",
-        deletedAt: Timestamp.now(),
-      })
-
-      toast.success(t("projectDeletedMsg"))
-      setIsDeleteDialogOpen(false)
-      setProjectToDelete(null)
-      fetchProjects()
-    } catch (error) {
-      console.error("Error deleting project:", error)
-      toast.error(t("errorDeletingProjectMsg"))
-    }
-  }
-
-  const filteredProjects = filterProjects(projects, searchFilters)
-  const activeProjects = filteredProjects.filter((p) => p.status === "active")
-  const completedProjects = filteredProjects.filter((p) => p.status === "completed")
-  const pendingProjects = filteredProjects.filter((p) => p.status === "pending")
-  const rejectedProjects = filteredProjects.filter((p) => p.status === "rejected")
-  const suspendedProjects = filteredProjects.filter((p) => p.status === "suspended")
-  const archivedProjects = filteredProjects.filter((p) => p.status === "archived")
-
-  const getDepartmentName = (deptValue: any) => {
-    if (!deptValue) return t("notAssigned")
-
-    const legacyMap: Record<string, { ar: string; en: string }> = {
-      cs: { ar: "علوم الحاسب", en: "Computer Science" },
-      it: { ar: "تقنية المعلومات", en: "Information Technology" },
-      is: { ar: "نظم المعلومات", en: "Information Systems" },
-    }
-    if (typeof deptValue === "string" && legacyMap[deptValue.toLowerCase()]) {
-      return language === "ar" ? legacyMap[deptValue.toLowerCase()].ar : legacyMap[deptValue.toLowerCase()].en
-    }
-
-    const byId = departments.find((d) => d.id === deptValue)
-    if (byId)
-      return language === "ar"
-        ? byId.nameAr || byId.nameEn || byId.code || t("notAssigned")
-        : byId.nameEn || byId.nameAr || byId.code || t("notAssigned")
-
-    if (typeof deptValue === "string") {
-      const normalized = deptValue.trim().toLowerCase()
-      const byCode = departments.find((d) => (d.code || "").trim().toLowerCase() === normalized)
-      if (byCode)
-        return language === "ar"
-          ? byCode.nameAr || byCode.nameEn || byCode.code || t("notAssigned")
-          : byCode.nameEn || byCode.nameAr || byCode.code || t("notAssigned")
-      if (deptValue.trim().length > 0) return deptValue
-    }
-
-    return t("notAssigned")
-  }
-
-  const ProjectCard = ({ project }: { project: any }) => (
-    <Card className="rounded-xl relative">
-      <CardHeader>
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <CardTitle className="text-lg">{project.title || t("noTitle")}</CardTitle>
-            <CardDescription className="mt-2 line-clamp-2">{project.description || t("noDescription")}</CardDescription>
-          </div>
-
-          <Badge
-            variant={
-              project.status === "active"
-                ? "default"
-                : project.status === "completed"
-                  ? "secondary"
-                  : project.status === "rejected"
-                    ? "destructive"
-                    : project.status === "suspended"
-                      ? "outline"
-                      : project.status === "archived"
-                        ? "secondary"
-                        : "outline"
-            }
-            className="rounded-lg"
-          >
-            {project.status === "active"
-              ? t("active")
-              : project.status === "completed"
-                ? t("completed")
-                : project.status === "rejected"
-                  ? t("rejected")
-                  : project.status === "pending"
-                    ? t("awaitingApproval")
-                    : project.status === "suspended"
-                      ? t("stopped")
-                      : project.status === "archived"
-                        ? t("archived")
-                        : t("unknown")}
-          </Badge>
+  if (authLoading || loading) {
+    return (
+      <DashboardLayout sidebarItems={coordinatorSidebarItems} requiredRole="coordinator">
+        <div className="p-8">
+          <Card className="rounded-xl">
+            <CardContent className="p-8">
+              <p className="text-center text-muted-foreground">{t("loading")}</p>
+            </CardContent>
+          </Card>
         </div>
-      </CardHeader>
-
-      <CardContent className="space-y-4">
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium">{t("progressLabel")}</span>
-            <span className="text-sm text-muted-foreground">{project.progress || 0}%</span>
-          </div>
-          <Progress value={project.progress || 0} />
-        </div>
-
-        <div className="grid gap-2 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">{t("startDateLabel")}</span>
-            <span>
-              {project.startDate
-                ? new Date(project.startDate.seconds * 1000).toLocaleDateString(language === "ar" ? "ar-EG" : "en-US")
-                : t("notAssigned")}
-            </span>
-          </div>
-
-          {project.endDate && (
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">{t("endDateLabel")}</span>
-              <span>
-                {new Date(project.endDate.seconds * 1000).toLocaleDateString(language === "ar" ? "ar-EG" : "en-US")}
-              </span>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">{t("supervisorLabel")}</span>
-            <span>{project.supervisorName || t("notAssigned")}</span>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">{t("departmentLabel")}</span>
-            <span>{getDepartmentName(project.department)}</span>
-          </div>
-
-          {project.studentName && (
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">{t("studentLabel")}</span>
-              <span>{project.studentName}</span>
-            </div>
-          )}
-        </div>
-
-        {project.status === "pending" && (
-          <div className="flex gap-2 pt-4 border-t">
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 bg-transparent rounded-lg"
-                  onClick={() => setSelectedProject(project)}
-                >
-                  <Eye className="w-4 h-4 ml-2" />
-                  {t("viewDetails")}
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl rounded-xl">
-                <DialogHeader>
-                  <DialogTitle>{selectedProject?.title}</DialogTitle>
-                  <DialogDescription>{t("projectProposalDetails")}</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-semibold mb-2">{language === "ar" ? "الوصف:" : "Description:"}</h4>
-                    <p className="text-sm text-muted-foreground">{selectedProject?.description}</p>
-                  </div>
-
-                  {selectedProject?.objectives && (
-                    <div>
-                      <h4 className="font-semibold mb-2">{t("objectives")}:</h4>
-                      <p className="text-sm text-muted-foreground">{selectedProject.objectives}</p>
-                    </div>
-                  )}
-
-                  <div className="flex gap-2 pt-4">
-                    <Button onClick={() => handleApproveProject(selectedProject?.id)} className="flex-1 rounded-lg">
-                      <Check className="w-4 h-4 ml-2" />
-                      {t("acceptProject")}
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => handleRejectProject(selectedProject?.id)}
-                      className="flex-1 rounded-lg"
-                    >
-                      <X className="w-4 h-4 ml-2" />
-                      {t("rejectProject")}
-                    </Button>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            <Button size="sm" onClick={() => handleApproveProject(project.id)} className="flex-1 rounded-lg">
-              <Check className="w-4 h-4 ml-2" />
-              {t("acceptProject")}
-            </Button>
-
-            <Button variant="destructive" size="sm" className="rounded-lg" onClick={() => handleRejectProject(project.id)}>
-              <X className="w-4 h-4 ml-2" />
-              {t("rejectProject")}
-            </Button>
-          </div>
-        )}
-
-        {(project.status === "active" || project.status === "suspended") && (
-          <div className="flex flex-wrap gap-2 pt-4 border-t justify-center">
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 rounded-lg bg-transparent"
-              onClick={() => {
-                setSelectedProject(project)
-                setIsEditDialogOpen(true)
-              }}
-            >
-              <Edit className="w-4 h-4 ml-2" />
-              {t("editProject")}
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 rounded-lg bg-transparent"
-              onClick={() => {
-                setSelectedProject(project)
-                loadProjectTeamMembers(project.id)
-                setIsTeamManagementOpen(true)
-              }}
-            >
-              <Users className="w-4 h-4 ml-2" />
-              {t("teamManagement")}
-            </Button>
-
-            {project.status === "active" && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 rounded-lg bg-transparent"
-                onClick={() => handleSuspendProject(project.id)}
-              >
-                <Pause className="w-4 h-4 ml-2" />
-                {language === "ar" ? t("TemporarySuspension") : "Suspend"}
-              </Button>
-            )}
-
-            {project.status === "suspended" && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 rounded-lg bg-transparent"
-                onClick={() => handleApproveProject(project.id)}
-              >
-                <Check className="w-4 h-4 ml-2" />
-                {language === "ar" ? t("activateProject") : "Activate"}
-              </Button>
-            )}
-
-            {project.status === "archived" && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 rounded-lg bg-transparent"
-                onClick={() => handleRestoreProject(project.id)}
-              >
-                <ArchiveIcon className="w-4 h-4 ml-2" />
-                {language === "ar" ? "إعادة من الأرشيف" : "Restore"}
-              </Button>
-            )}
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 rounded-lg bg-transparent"
-              onClick={() => handleArchiveProject(project.id)}
-            >
-              <ArchiveIcon className="w-4 h-4 ml-2" />
-              {t("archiveProject")}
-            </Button>
-
-            <Button
-              variant="destructive"
-              size="sm"
-              className="absolute -top-2 -right-2 rounded-full w-8 h-8 p-0 flex items-center justify-center shadow-lg"
-              onClick={() => {
-                setProjectToDelete(project)
-                setIsDeleteDialogOpen(true)
-              }}
-            >
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
+      </DashboardLayout>
+    )
+  }
 
   return (
     <DashboardLayout sidebarItems={coordinatorSidebarItems} requiredRole="coordinator">
       <div className="p-8 space-y-8">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">{t("allProjects")}</h1>
-            <p className="text-muted-foreground mt-2">{t("projectsManagement")}</p>
+            <h1 className="text-3xl font-bold">{t("manageStudents")}</h1>
+            <p className="text-muted-foreground mt-2">{t("assignSupervisorsAndTrackStudents")}</p>
           </div>
-
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="rounded-lg">
-                <Plus className="w-4 h-4 ml-2" />
-                {t("addProject")}
-              </Button>
-            </DialogTrigger>
-
-            <DialogContent className="max-w-2xl rounded-xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>{language === "ar" ? t("addNewProject") : "Add New Project"}</DialogTitle>
-                <DialogDescription>
-                  {language === "ar"
-                    ? t("enterProjectDetailsAndAssignSupervisorAndStudent")
-                    : "Enter project details and assign supervisor and student"}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="title">{t("projectTitle")} *</Label>
-                  <Input
-                    id="title"
-                    value={newProject.title}
-                    onChange={(e) => setNewProject({ ...newProject, title: e.target.value })}
-                    placeholder={language === "ar" ? t("enterProjectTitle") : "Enter project title"}
-                    className="rounded-lg"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="description">{t("projectDescription")} *</Label>
-                  <Textarea
-                    id="description"
-                    value={newProject.description}
-                    onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
-                    placeholder={language === "ar" ? t("enterProjectDescription") : "Enter project description"}
-                    rows={4}
-                    className="rounded-lg"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="startDate">
-                      {language === "ar" ? t("projectStartDate") : "Project Start Date *"}
-                    </Label>
-                    <Input
-                      id="startDate"
-                      type="date"
-                      value={newProject.startDate}
-                      onChange={(e) => setNewProject({ ...newProject, startDate: e.target.value })}
-                      className="rounded-lg"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="endDate">
-                      {language === "ar" ? t("projectEndDate") : "Project End Date (Optional)"}
-                    </Label>
-                    <Input
-                      id="endDate"
-                      type="date"
-                      value={newProject.endDate}
-                      onChange={(e) => setNewProject({ ...newProject, endDate: e.target.value })}
-                      className="rounded-lg"
-                      min={newProject.startDate}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="supervisor">{t("supervisors")} *</Label>
-                    <Select
-                      value={newProject.supervisorId}
-                      onValueChange={(value) => setNewProject({ ...newProject, supervisorId: value })}
-                    >
-                      <SelectTrigger className="rounded-lg">
-                        <SelectValue placeholder={language === "ar" ? t("selectSupervisor") : "Select supervisor"} />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-lg">
-                        {supervisors.map((supervisor) => (
-                          <SelectItem key={supervisor.id} value={supervisor.id}>
-                            {supervisor.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="student">{language === "ar" ? t("stu") : "Student (Optional)"}</Label>
-                    <Select
-                      value={newProject.studentId}
-                      onValueChange={(value) => setNewProject({ ...newProject, studentId: value })}
-                    >
-                      <SelectTrigger className="rounded-lg">
-                        <SelectValue placeholder={language === "ar" ? t("selectStudent") : "Select student"} />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-lg">
-                        <SelectItem value="none">{language === "ar" ? t("noStudent") : "No student"}</SelectItem>
-                        {students.map((student) => (
-                          <SelectItem key={student.id} value={student.id}>
-                            {student.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="department">{t("department")} *</Label>
-                  <Select
-                    value={newProject.department}
-                    onValueChange={(value) => setNewProject({ ...newProject, department: value })}
-                  >
-                    <SelectTrigger className="rounded-lg">
-                      <SelectValue placeholder={language === "ar" ? t("selectDepartment") : "Select department"} />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-lg">
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.code}>
-                          {language === "ar" ? dept.nameAr : dept.nameEn}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className="rounded-lg">
-                  {t("cancel")}
-                </Button>
-                <Button onClick={handleAddProject} className="rounded-lg">
-                  {language === "ar" ? t("addProj") : "Add Project"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <Button onClick={() => setIsAddStudentDialogOpen(true)} className="rounded-lg">
+            <UserPlus className="w-4 h-4 ml-2" />
+            {t("addNewStudent")}
+          </Button>
         </div>
 
-        <AdvancedSearch
-          filters={searchFilters}
-          onFiltersChange={setSearchFilters}
-          showStatusFilter
-          showDepartmentFilter
-          showSupervisorFilter
-          showStudentFilter
-          showDateFilter
-          supervisors={supervisors.map((s) => ({ id: s.id, name: s.name }))}
-          students={students.map((s) => ({ id: s.id, name: s.name }))}
-          departments={departments.map((dept) => (language === "ar" ? dept.nameAr : dept.nameEn))}
-          statusOptions={[
-            { value: "active", label: t("active") },
-            { value: "pending", label: t("awaitingApproval") },
-            { value: "completed", label: t("completed") },
-            { value: "rejected", label: t("rejected") },
-            { value: "suspended", label: t("stopped") },
-            { value: "archived", label: t("archived") },
-          ]}
-          placeholder={language === "ar" ? t("searchProjects") : "Search projects..."}
-        />
-
-        {loading ? (
+        <div className="grid gap-6 md:grid-cols-3">
           <Card className="rounded-xl">
-            <CardContent className="p-8">
-              <p className="text-center text-muted-foreground">{t("loading")}</p>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{t("totalStudents")}</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{students.length}</div>
             </CardContent>
           </Card>
-        ) : filteredProjects.length === 0 ? (
+
+          <Card className="rounded-xl">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{t("studentsWithoutSupervisor")}</CardTitle>
+              <UserPlus className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-orange-600">{students.filter((s) => !s.supervisorId).length}</div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-xl">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{t("studentsWithSupervisor")}</CardTitle>
+              <UserCheck className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">{students.filter((s) => s.supervisorId).length}</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {students.length === 0 ? (
           <Card className="rounded-xl">
             <CardContent className="p-8">
               <div className="text-center space-y-4">
-                <FolderKanban className="w-16 h-16 mx-auto text-muted-foreground" />
+                <Users className="w-16 h-16 mx-auto text-muted-foreground" />
                 <div>
-                  <h3 className="text-lg font-semibold">
-                    {projects.length === 0
-                      ? t("noProjectsCurrently")
-                      : language === "ar"
-                        ? t("noMatchingResults")
-                        : "No matching results"}
-                  </h3>
-                  <p className="text-sm text-muted-foreground mt-2">
-                    {projects.length === 0
-                      ? language === "ar"
-                        ? t("startAddingProjects")
-                        : "Start by adding new projects"
-                      : language === "ar"
-                        ? "جرب تعديل معايير البحث"
-                        : "Try adjusting search filters"}
-                  </p>
+                  <h3 className="text-lg font-semibold">{t("noStudentsYet")}</h3>
+                  <p className="text-sm text-muted-foreground mt-2">{t("studentsWillAppearAfterRegistration")}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
         ) : (
-          <Tabs defaultValue="all" className="space-y-6">
-            <TabsList className="rounded-lg">
-              <TabsTrigger value="all" className="rounded-lg">
-                {language === "ar" ? `الكل (${filteredProjects.length})` : `All (${filteredProjects.length})`}
-              </TabsTrigger>
-
-              <TabsTrigger value="pending" className="rounded-lg">
-                {language === "ar"
-                  ? `بانتظار الموافقة (${pendingProjects.length})`
-                  : `Awaiting Approval (${pendingProjects.length})`}
-                {pendingProjects.length > 0 && (
-                  <Badge variant="destructive" className="mr-2 h-5 w-5 rounded-full p-0 text-xs">
-                    {pendingProjects.length}
-                  </Badge>
-                )}
-              </TabsTrigger>
-
-              <TabsTrigger value="active" className="rounded-lg">
-                {language === "ar" ? `نشطة (${activeProjects.length})` : `Active (${activeProjects.length})`}
-              </TabsTrigger>
-
-              <TabsTrigger value="completed" className="rounded-lg">
-                {language === "ar" ? `مكتملة (${completedProjects.length})` : `Completed (${completedProjects.length})`}
-              </TabsTrigger>
-
-              <TabsTrigger value="rejected" className="rounded-lg">
-                {language === "ar" ? `مرفوضة (${rejectedProjects.length})` : `Rejected (${rejectedProjects.length})`}
-              </TabsTrigger>
-
-              <TabsTrigger value="suspended" className="rounded-lg">
-                {language === "ar" ? `موقوفة (${suspendedProjects.length})` : `Stopped (${suspendedProjects.length})`}
-              </TabsTrigger>
-
-              <TabsTrigger value="archived" className="rounded-lg">
-                {language === "ar" ? `مؤرشفة (${archivedProjects.length})` : `Archived (${archivedProjects.length})`}
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="all" className="grid gap-6 md:grid-cols-2">
-              {filteredProjects.map((project) => (
-                <ProjectCard key={project.id} project={project} />
-              ))}
-            </TabsContent>
-
-            <TabsContent value="pending" className="grid gap-6 md:grid-cols-2">
-              {pendingProjects.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8 col-span-2">
-                  {language === "ar" ? "لا توجد مشاريع بانتظار الموافقة" : "No projects awaiting approval"}
-                </p>
-              ) : (
-                pendingProjects.map((project) => <ProjectCard key={project.id} project={project} />)
-              )}
-            </TabsContent>
-
-            <TabsContent value="active" className="grid gap-6 md:grid-cols-2">
-              {activeProjects.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8 col-span-2">
-                  {language === "ar" ? "لا توجد مشاريع نشطة" : "No active projects"}
-                </p>
-              ) : (
-                activeProjects.map((project) => <ProjectCard key={project.id} project={project} />)
-              )}
-            </TabsContent>
-
-            <TabsContent value="completed" className="grid gap-6 md:grid-cols-2">
-              {completedProjects.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8 col-span-2">
-                  {language === "ar" ? "لا توجد مشاريع مكتملة" : "No completed projects"}
-                </p>
-              ) : (
-                completedProjects.map((project) => <ProjectCard key={project.id} project={project} />)
-              )}
-            </TabsContent>
-
-            <TabsContent value="rejected" className="grid gap-6 md:grid-cols-2">
-              {rejectedProjects.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8 col-span-2">
-                  {language === "ar" ? "لا توجد مشاريع مرفوضة" : "No rejected projects"}
-                </p>
-              ) : (
-                rejectedProjects.map((project) => <ProjectCard key={project.id} project={project} />)
-              )}
-            </TabsContent>
-
-            <TabsContent value="suspended" className="grid gap-6 md:grid-cols-2">
-              {suspendedProjects.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8 col-span-2">
-                  {language === "ar" ? "لا توجد مشاريع موقوفة" : "No stopped projects"}
-                </p>
-              ) : (
-                suspendedProjects.map((project) => <ProjectCard key={project.id} project={project} />)
-              )}
-            </TabsContent>
-
-            <TabsContent value="archived" className="grid gap-6 md:grid-cols-2">
-              {archivedProjects.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8 col-span-2">
-                  {language === "ar" ? "لا توجد مشاريع مؤرشفة" : "No archived projects"}
-                </p>
-              ) : (
-                archivedProjects.map((project) => <ProjectCard key={project.id} project={project} />)
-              )}
-            </TabsContent>
-          </Tabs>
-        )}
-
-        {/* Team Management Dialog */}
-        <Dialog open={isTeamManagementOpen} onOpenChange={setIsTeamManagementOpen}>
-          <DialogContent className="max-w-2xl rounded-xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{language === "ar" ? "إدارة فريق المشروع" : "Project Team Management"}</DialogTitle>
-              <DialogDescription>
-                {language === "ar"
-                  ? `إضافة أو حذف طلاب من المشروع: ${selectedProject?.title || ""}`
-                  : `Add or remove students from: ${selectedProject?.title || ""}`}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-6">
+          <Card className="rounded-xl">
+            <CardHeader>
+              <CardTitle>{t("studentsList")}</CardTitle>
+              <CardDescription>{t("allStudentsInSystem")}</CardDescription>
+            </CardHeader>
+            <CardContent>
               <div className="space-y-4">
-                <h4 className="font-semibold">{language === "ar" ? "إضافة طالب جديد" : "Add New Student"}</h4>
-                <div className="flex gap-2">
-                  <Select value={selectedStudentToAdd} onValueChange={setSelectedStudentToAdd}>
-                    <SelectTrigger className="flex-1 rounded-lg">
-                      <SelectValue placeholder={language === "ar" ? "اختر طالباً" : "Select a student"} />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-lg">
-                      {students
-                        .filter((student) => !student.projectId)
-                        .map((student) => (
-                          <SelectItem key={student.id} value={student.id}>
-                            {student.name} ({student.email})
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={handleAddStudentToProject} className="rounded-lg">
-                    <Plus className="w-4 h-4 ml-2" />
-                    {t("add")}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <h4 className="font-semibold">
-                  {language === "ar"
-                    ? `أعضاء الفريق الحاليون (${projectTeamMembers.length})`
-                    : `Current Team Members (${projectTeamMembers.length})`}
-                </h4>
-                {projectTeamMembers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    {language === "ar" ? "لا يوجد طلاب في هذا المشروع" : "No students in this project"}
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {projectTeamMembers.map((member) => (
-                      <div key={member.id} className="flex items-center justify-between p-3 border rounded-lg bg-muted/50">
-                        <div>
-                          <p className="font-medium">{member.name}</p>
-                          <p className="text-sm text-muted-foreground">{member.email}</p>
+                {students.map((student) => {
+                  const supervisor = supervisors.find((s) => s.id === student.supervisorId)
+                  return (
+                    <div
+                      key={student.id}
+                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex-1 space-y-1">
+                        <div className="flex items-center gap-3">
+                          <p className="font-medium">{student.name}</p>
+                          <Badge variant="outline" className="rounded-lg">
+                            {student.studentId}
+                          </Badge>
                         </div>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleRemoveStudentFromProject(member.id)}
-                          className="rounded-lg"
-                        >
-                          <Trash2 className="w-4 h-4 ml-2" />
-                          {t("removeStudent")}
+                        <p className="text-sm text-muted-foreground">{student.email}</p>
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="text-muted-foreground">{t("department")}:</span>
+                          <span>
+                            {departments.find((d) => d.code === student.department)?.name ||
+                              student.department ||
+                              t("notSpecified")}
+                          </span>
+                        </div>
+                        {supervisor && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="text-muted-foreground">{t("supervisor")}:</span>
+                            <span className="font-medium text-primary">{supervisor.name}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {student.supervisorId ? (
+                          <Badge className="rounded-lg bg-green-500">{t("assigned")}</Badge>
+                        ) : (
+                          <Badge variant="secondary" className="rounded-lg">
+                            {t("noSupervisor")}
+                          </Badge>
+                        )}
+                        <Button onClick={() => openAssignDialog(student)} size="sm" className="rounded-lg">
+                          {student.supervisorId ? t("changeSupervisor") : t("assignSupervisor")}
                         </Button>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  )
+                })}
               </div>
-            </div>
+            </CardContent>
+          </Card>
+        )}
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsTeamManagementOpen(false)} className="rounded-lg">
-                {t("close")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Edit Dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="max-w-2xl rounded-xl max-h-[90vh] overflow-y-auto">
+        {/* Assign Dialog */}
+        <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
+          <DialogContent className="rounded-xl">
             <DialogHeader>
-              <DialogTitle>{t("editProject")}</DialogTitle>
-              <DialogDescription>{language === "ar" ? "قم بتحديث بيانات المشروع" : "Update project information"}</DialogDescription>
+              <DialogTitle>{t("assignSupervisor")}</DialogTitle>
+              <DialogDescription>{t("selectSupervisorForStudent")} {selectedStudent?.name}</DialogDescription>
             </DialogHeader>
-
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-title">{t("projectTitle")} *</Label>
-                <Input
-                  id="edit-title"
-                  value={selectedProject?.title || ""}
-                  onChange={(e) => setSelectedProject({ ...selectedProject, title: e.target.value })}
-                  placeholder={language === "ar" ? "أدخل عنوان المشروع" : "Enter project title"}
-                  className="rounded-lg"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-description">{t("projectDescription")} *</Label>
-                <Textarea
-                  id="edit-description"
-                  value={selectedProject?.description || ""}
-                  onChange={(e) => setSelectedProject({ ...selectedProject, description: e.target.value })}
-                  placeholder={language === "ar" ? "أدخل وصف المشروع" : "Enter project description"}
-                  rows={4}
-                  className="rounded-lg"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-startDate">{language === "ar" ? "تاريخ بداية المشروع" : "Start Date"}</Label>
-                  <Input
-                    id="edit-startDate"
-                    type="date"
-                    value={
-                      selectedProject?.startDate
-                        ? typeof selectedProject.startDate === "string"
-                          ? selectedProject.startDate
-                          : new Date(selectedProject.startDate.seconds * 1000).toISOString().split("T")[0]
-                        : ""
-                    }
-                    onChange={(e) => setSelectedProject({ ...selectedProject, startDate: e.target.value })}
-                    className="rounded-lg"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="edit-endDate">{language === "ar" ? "تاريخ انتهاء المشروع" : "End Date"}</Label>
-                  <Input
-                    id="edit-endDate"
-                    type="date"
-                    value={
-                      selectedProject?.endDate
-                        ? typeof selectedProject.endDate === "string"
-                          ? selectedProject.endDate
-                          : new Date(selectedProject.endDate.seconds * 1000).toISOString().split("T")[0]
-                        : ""
-                    }
-                    onChange={(e) => setSelectedProject({ ...selectedProject, endDate: e.target.value })}
-                    className="rounded-lg"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-supervisor">{t("supervisors")} *</Label>
-                  <Select
-                    value={selectedProject?.supervisorId || ""}
-                    onValueChange={(value) => setSelectedProject({ ...selectedProject, supervisorId: value })}
-                  >
-                    <SelectTrigger className="rounded-lg">
-                      <SelectValue placeholder={language === "ar" ? "اختر المشرف" : "Select supervisor"} />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-lg">
-                      {supervisors.map((supervisor) => (
-                        <SelectItem key={supervisor.id} value={supervisor.id}>
-                          {supervisor.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="edit-student">{language === "ar" ? "الطالب (اختياري)" : "Student (Optional)"}</Label>
-                  <Select
-                    value={selectedProject?.studentId || "none"}
-                    onValueChange={(value) => setSelectedProject({ ...selectedProject, studentId: value })}
-                  >
-                    <SelectTrigger className="rounded-lg">
-                      <SelectValue placeholder={language === "ar" ? "اختر الطالب" : "Select student"} />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-lg">
-                      <SelectItem value="none">{language === "ar" ? "بدون طالب" : "No student"}</SelectItem>
-                      {students.map((student) => (
-                        <SelectItem key={student.id} value={student.id}>
-                          {student.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-department">{t("department")} *</Label>
-                <Select
-                  value={selectedProject?.department || ""}
-                  onValueChange={(value) => setSelectedProject({ ...selectedProject, department: value })}
-                >
+              <div>
+                <Label>{t("supervisor")}</Label>
+                <Select value={selectedSupervisorId} onValueChange={setSelectedSupervisorId}>
                   <SelectTrigger className="rounded-lg">
-                    <SelectValue placeholder={language === "ar" ? "اختر القسم" : "Select department"} />
+                    <SelectValue placeholder={t("selectSupervisor")} />
                   </SelectTrigger>
                   <SelectContent className="rounded-lg">
-                    {departments.map((dept) => (
-                      <SelectItem key={dept.id} value={dept.code}>
-                        {language === "ar" ? dept.nameAr : dept.nameEn}
+                    {supervisors.map((supervisor) => (
+                      <SelectItem key={supervisor.id} value={supervisor.id}>
+                        <div className="flex items-center justify-between w-full">
+                          <span>{supervisor.name}</span>
+                          <span className="text-xs text-muted-foreground mr-2">({supervisor.studentCount} {t("student")})</span>
+                        </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
+              {selectedSupervisorId && (
+                <div className="p-3 bg-muted rounded-lg">
+                  <p className="text-sm text-muted-foreground">
+                    {t("selectedSupervisor")}:{" "}
+                    <span className="font-medium text-foreground">
+                      {supervisors.find((s) => s.id === selectedSupervisorId)?.name}
+                    </span>
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    عدد الطلاب الحالي:{" "}
+                    <span className="font-medium text-foreground">
+                      {supervisors.find((s) => s.id === selectedSupervisorId)?.studentCount}
+                    </span>
+                  </p>
+                </div>
+              )}
+            </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="rounded-lg">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsAssignDialogOpen(false)
+                  setIsConfirmChangeOpen(false)
+                  setPendingSupervisorId("")
+                  setCurrentSupervisorName("")
+                  setTargetSupervisorName("")
+                }}
+                className="rounded-lg"
+              >
                 {t("cancel")}
               </Button>
-              <Button onClick={handleUpdateProject} className="rounded-lg" disabled={isUpdating}>
-                {isUpdating ? t("loading") : language === "ar" ? "حفظ التغييرات" : "Save Changes"}
+              <Button onClick={handleAssignSupervisor} className="rounded-lg">
+                {t("assign")}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Delete Dialog */}
-        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        {/* Confirm Change Dialog */}
+        <Dialog open={isConfirmChangeOpen} onOpenChange={setIsConfirmChangeOpen}>
           <DialogContent className="rounded-xl">
             <DialogHeader>
-              <DialogTitle>{t("confirmDelete")}</DialogTitle>
-              <DialogDescription>
-                {language === "ar"
-                  ? `هل أنت متأكد من حذف المشروع "${projectToDelete?.title}"؟ هذا الإجراء لا يمكن التراجع عنه.`
-                  : `Are you sure you want to delete "${projectToDelete?.title}"? This action cannot be undone.`}
-              </DialogDescription>
+              <DialogTitle>{t("confirmChangeSupervisor")}</DialogTitle>
+              <DialogDescription>{t("studentAlreadyAssignedToProjectOrSupervisor")}</DialogDescription>
             </DialogHeader>
+
+            <div className="space-y-3">
+              <div className="p-3 rounded-lg bg-muted">
+                <p className="text-sm text-muted-foreground">
+                  الطالب: <span className="font-medium text-foreground">{selectedStudent?.name}</span>
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  المشرف الحالي: <span className="font-medium text-foreground">{currentSupervisorName}</span>
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  المشرف الجديد: <span className="font-medium text-foreground">{targetSupervisorName}</span>
+                </p>
+
+                {selectedStudent?.projectId && (
+                  <p className="text-sm text-amber-700 mt-2">
+                    {t("alertStudentHasProjectLinked")} 
+                  </p>
+                )}
+              </div>
+
+              <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
+               {t("AreYouSureYouWantToChangeTheSupervisor")}
+              </div>
+            </div>
+
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="rounded-lg">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsConfirmChangeOpen(false)
+                  setPendingSupervisorId("")
+                  setCurrentSupervisorName("")
+                  setTargetSupervisorName("")
+                }}
+                className="rounded-lg"
+              >
                 {t("cancel")}
               </Button>
-              <Button variant="destructive" onClick={handleDeleteProject} className="rounded-lg">
-                {language === "ar" ? "حذف المشروع" : "Delete Project"}
+              <Button onClick={handleAssignSupervisor} className="rounded-lg">
+               {t("YesChange")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Student Dialog */}
+        <Dialog open={isAddStudentDialogOpen} onOpenChange={setIsAddStudentDialogOpen}>
+          <DialogContent className="rounded-xl max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t("AddNewStudent")}</DialogTitle>
+              <DialogDescription>{t("addNewStudentDescription")}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>{t("fullName")}  *</Label>
+                <Input
+                  value={newStudent.name}
+                  onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })}
+                  placeholder={t("enterFullName")}
+                  className="rounded-lg"
+                />
+              </div>
+              <div>
+                <Label>{t("email")} *</Label>
+                <Input
+                  type="email"
+                  value={newStudent.email}
+                  onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })}
+                  placeholder="student@example.com"
+                  className="rounded-lg"
+                />
+              </div>
+              <div>
+                <Label>{t("password")} *</Label>
+                <Input
+                  type="password"
+                  value={newStudent.password}
+                  onChange={(e) => setNewStudent({ ...newStudent, password: e.target.value })}
+                  placeholder={t("enterPassword")}
+                  className="rounded-lg"
+                  minLength={6}
+                />
+              </div>
+              <div>
+                <Label>{t("studentId")} *</Label>
+                <Input
+                  value={newStudent.studentId}
+                  onChange={(e) => setNewStudent({ ...newStudent, studentId: e.target.value })}
+                  placeholder={t("enterStudentId")}
+                  className="rounded-lg"
+                />
+              </div>
+
+              <div>
+                <Label>{t("department")} *</Label>
+                <Select
+                  value={newStudent.department}
+                  onValueChange={(value) => setNewStudent({ ...newStudent, department: value })}
+                >
+                  <SelectTrigger className="rounded-lg border-2">
+                    <SelectValue placeholder={t("selectDepartment")}>
+                      {newStudent.department && departments.length > 0 ? (
+                        <span className="text-foreground font-medium">
+                          {departments.find((d) => d.code === newStudent.department)?.name || newStudent.department}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">{t("selectDepartment")}</span>
+                      )}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="rounded-lg">
+                    {departments.length === 0 ? (
+                      <div className="p-3 text-sm text-center">
+                        <p className="text-foreground font-medium">{t("noDepartmentsAvailable")}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{t("addDepartmentsFromManagementPage")}</p>
+                      </div>
+                    ) : (
+                      departments.map((dept) => (
+                        <SelectItem key={dept.id} value={dept.code} className="cursor-pointer">
+                          <div className="flex items-center justify-between w-full">
+                            <span className="font-medium text-foreground">{dept.name}</span>
+                            <span className="text-xs text-muted-foreground mr-2">({dept.code})</span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+
+                {newStudent.department && departments.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {t("selectedDepartment")}:{" "}
+                    <span className="font-medium text-foreground">
+                      {departments.find((d) => d.code === newStudent.department)?.name}
+                    </span>
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label>{t("phone")} *</Label>
+                <Input
+                  value={newStudent.phone}
+                  onChange={(e) => setNewStudent({ ...newStudent, phone: e.target.value })}
+                  placeholder={t("enterPhone")}
+                  className="rounded-lg"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddStudentDialogOpen(false)} className="rounded-lg">
+                {t("cancel")}
+              </Button>
+              <Button onClick={handleAddStudent} className="rounded-lg">
+                {t("addStudent")}
               </Button>
             </DialogFooter>
           </DialogContent>
