@@ -33,7 +33,6 @@ import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
 import { useLanguage } from "@/lib/contexts/language-context"
 
-const { t } = useLanguage()
 
 const sidebarItems = [
   { title: "لوحة التحكم", href: "/supervisor/dashboard", icon: <Home className="w-5 h-5" /> },
@@ -73,6 +72,7 @@ export default function SupervisorAnnouncements() {
     projectId: "all",
     isPinned: false,
   })
+  const { t } = useLanguage()
 
   useEffect(() => {
     if (authLoading || !userData?.uid) return
