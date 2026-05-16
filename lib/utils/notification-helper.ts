@@ -4,7 +4,6 @@ import { getFirebaseDb } from "@/lib/firebase/config"
 import { translations } from "@/lib/contexts/language-context"
 
 const t = (key: string) => translations.ar[key] || key
-
 export async function notifyProjectApproved(studentId: string, projectTitle: string, supervisorName: string) {
   await createNotification({
     userId: studentId,
