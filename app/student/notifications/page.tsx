@@ -97,11 +97,11 @@ export default function StudentNotifications() {
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <CardTitle className={cn("text-lg", !notification.read && "font-bold")}>
-                      {notification.title}
+                      {language === "ar" ? notification.title : (notification.titleEn || notification.title)}
                     </CardTitle>
                     {!notification.read && <div className="w-2 h-2 bg-primary rounded-full mt-2" />}
                   </div>
-                  <CardDescription>{notification.message}</CardDescription>
+                  <CardDescription>{language === "ar" ? notification.message : (notification.messageEn || notification.message)}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <p className="text-xs text-muted-foreground">
