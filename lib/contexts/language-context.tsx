@@ -1,5 +1,6 @@
 "use client"
 
+import { da } from "date-fns/locale"
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
 
@@ -1385,7 +1386,6 @@ const translations: Record<Language, Record<string, string>> = {
       twoC:"كورسين (فصلين دراسيين)",
       pleaseSelectProjectDuration:"الرجاء اختيار مدة المشروع",
       waitingForTeamApproval:"بانتظار موافقة الفريق",
-
       somethingWentWrong:"حدث خطأ ما",
       pleaseTryAgain:"عذراً، حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.",
       errorDetails:"تفاصيل الخطأ:",
@@ -1403,6 +1403,29 @@ const translations: Record<Language, Record<string, string>> = {
       sendVerificationEmail:"إعادة إرسال رسالة التحقق",
       sending:"جاري الإرسال...",
 
+      projectIdeaAccepted:"تم قبول فكرة المشروع",
+      supervisorChoosen:"وتم تعيين المشرف ",
+      acceptYourIdea:"تم قبول فكرة مشروعك ",
+      yourProjectIdeaRejected:"تم رفض فكرة مشروعك",
+      reason: "السبب: ",
+      newTaskAssignedTo:"تم تعيين مهمة جديدة",
+      newTaskSubmitted:"تم تسليم مهمة",
+      submittedTheTask:"بتسليم المهمة",
+      theStudent:"قام الطالب ",
+      theTaskGradded:"تم تقييم المهمة ",
+      newMeeting:"اجتماع جديد",
+      with:"مع",
+      in:"في",
+      theMeetingIsScheduled:"تم جدولة اجتماع ",
+      theMeetingCancelled:"تم إلغاء الاجتماع",
+      deadlineSoon:"تذكير: موعد التسليم قريب",
+      after:"بعد",
+      day:"يوم",
+      days:"أيام",
+      newMessageFrom:"رسالة جديدة من ",
+      newProjectIsAssigned:"مشروع جديد تم تعيينه",
+      forStudent: "للطالب",
+      youAreSupervisorOf:"تم تعيينك كمشرف على مشروع ",
     },
 
   en: {
@@ -2755,5 +2778,28 @@ const translations: Record<Language, Record<string, string>> = {
     errorSendingVerificationEmail: "An error occurred while sending the verification email",
     sendVerificationEmail: "Resend Verification Email",
     sending: "Sending...",
+    projectIdeaAccepted: "Project idea accepted",
+    supervisorChoosen: "and supervisor assigned ",
+    acceptYourIdea: "Your project idea has been accepted ",
+    yourProjectIdeaRejected: "Your project idea has been rejected",
+    reason: "Reason: ",
+    newTaskAssignedTo: "New task assigned",
+    newTaskSubmitted: "Task submitted",
+    submittedTheTask: "submitted the task",
+    theStudent: "The student ",
+    theTaskGradded: "The task has been graded ",
+    newMeeting: "New meeting",
+    with: "with",
+    in: "in",
+    theMeetingIsScheduled: "A meeting has been scheduled ",
+    theMeetingCancelled: "The meeting has been cancelled",
+    deadlineSoon: "Reminder: Deadline approaching",
+    after: "after",
+    day: "day",
+    days: "days",
+    newMessageFrom: "New message from ",
+    newProjectIsAssigned: "New project assigned",
+    forStudent: "for student",
+    youAreSupervisorOf: "You have been assigned as supervisor for project ",
   },
 }

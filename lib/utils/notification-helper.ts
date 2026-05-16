@@ -1,12 +1,15 @@
 import { createNotification, createBatchNotifications } from "@/lib/firebase/notifications"
 import { collection, query, where, getDocs } from "firebase/firestore"
 import { getFirebaseDb } from "@/lib/firebase/config"
+import { translations } from "@/lib/translations"
+
+const t = (key: string) => translations.ar[key] || key
 
 export async function notifyProjectApproved(studentId: string, projectTitle: string, supervisorName: string) {
   await createNotification({
     userId: studentId,
-    title: "تم قبول فكرة المشروع",
-    message: `تم قبول فكرة مشروعك "${projectTitle}" وتم تعيين المشرف ${supervisorName}`,
+    title: t("projectIdeaAccepted"),
+    message: `${t("acceptYourIdea")} "${projectTitle}" ${t("supervisorChoosen")}${supervisorName}`,
     type: "success",
     link: "/student/project",
     priority: "high",
@@ -17,8 +20,8 @@ export async function notifyProjectApproved(studentId: string, projectTitle: str
 export async function notifyProjectRejected(studentId: string, projectTitle: string, reason: string) {
   await createNotification({
     userId: studentId,
-    title: "تم رفض فكرة المشروع",
-    message: `تم رفض فكرة مشروعك "${projectTitle}". السبب: ${reason}`,
+    title: t("projectIdeaRejectedMsg"),
+    message: `${t("yourProjectIdeaRejected")}"${projectTitle}". ${t("reason")}: ${reason}`,
     type: "error",
     link: "/student/project",
     priority: "high",
@@ -29,8 +32,8 @@ export async function notifyProjectRejected(studentId: string, projectTitle: str
 export async function notifyNewProjectIdea(coordinatorId: string, studentName: string, projectTitle: string) {
   await createNotification({
     userId: coordinatorId,
-    title: "فكرة مشروع جديدة",
-    message: `قدم الطالب ${studentName} فكرة مشروع جديدة: ${projectTitle}`,
+    title: t("newProjectIdea"),
+    message: ` ${t("studentSubmittedNewProjectIdea")} ${studentName} ${t("newProjectIdea")}: ${projectTitle}`,
     type: "info",
     link: "/coordinator/approve-projects",
     priority: "medium",
@@ -41,8 +44,8 @@ export async function notifyNewProjectIdea(coordinatorId: string, studentName: s
 export async function notifyTaskAssigned(studentId: string, taskTitle: string, dueDate: Date) {
   await createNotification({
     userId: studentId,
-    title: "مهمة جديدة",
-    message: `تم تعيين مهمة جديدة: ${taskTitle}. تاريخ الاستحقاق: ${dueDate.toLocaleDateString("ar-EG")}`,
+    title: t("newTaskAssigned"),
+    message: ` ${t("newTaskAssignedTo")} ${taskTitle}.  ${t("dueDate")}: ${dueDate.toLocaleDateString("ar-EG")}`,
     type: "task",
     link: "/student/tasks",
     priority: "high",
@@ -53,8 +56,8 @@ export async function notifyTaskAssigned(studentId: string, taskTitle: string, d
 export async function notifyTaskSubmitted(supervisorId: string, studentName: string, taskTitle: string) {
   await createNotification({
     userId: supervisorId,
-    title: "تم تسليم مهمة",
-    message: `قام الطالب ${studentName} بتسليم المهمة: ${taskTitle}`,
+    title: t("newTaskSubmitted"),
+    message: ` ${t("theStudent")} ${studentName} ${t("submittedTheTask")}: ${taskTitle}`,
     type: "info",
     link: "/supervisor/tasks",
     priority: "medium",
@@ -65,8 +68,8 @@ export async function notifyTaskSubmitted(supervisorId: string, studentName: str
 export async function notifyTaskGraded(studentId: string, taskTitle: string, grade: number, maxGrade: number) {
   await createNotification({
     userId: studentId,
-    title: "تم تقييم المهمة",
-    message: `تم تقييم المهمة "${taskTitle}". الدرجة: ${grade}/${maxGrade}`,
+    title: t("gradeUpdated"),
+    message: `${t("theTaskGradded")} "${taskTitle}". ${t("grade")}: ${grade}/${maxGrade}`,
     type: "evaluation",
     link: "/student/tasks",
     priority: "high",
@@ -77,8 +80,8 @@ export async function notifyTaskGraded(studentId: string, taskTitle: string, gra
 export async function notifyMeetingScheduled(studentId: string, title: string, date: Date, supervisorName: string) {
   await createNotification({
     userId: studentId,
-    title: "اجتماع جديد",
-    message: `تم جدولة اجتماع "${title}" مع ${supervisorName} في ${date.toLocaleString("ar-SA")}`,
+    title: t("newMeeting"),
+    message: ` ${t("theMeetingIsScheduled")} "${title}" ${t("with")} ${supervisorName} ${t("in")} ${date.toLocaleString("ar-SA")}`,
     type: "meeting",
     link: "/student/meetings",
     priority: "high",
@@ -89,8 +92,8 @@ export async function notifyMeetingScheduled(studentId: string, title: string, d
 export async function notifyMeetingCancelled(studentId: string, title: string) {
   await createNotification({
     userId: studentId,
-    title: "تم إلغاء الاجتماع",
-    message: `تم إلغاء الاجتماع: ${title}`,
+    title: t("theMeetingCancelled"),
+    message: ` ${t("theMeetingCancelled")}: ${title}`,
     type: "warning",
     link: "/student/meetings",
     priority: "medium",
@@ -101,8 +104,8 @@ export async function notifyMeetingCancelled(studentId: string, title: string) {
 export async function notifyDeadlineApproaching(studentId: string, taskTitle: string, daysRemaining: number) {
   await createNotification({
     userId: studentId,
-    title: "تذكير: موعد التسليم قريب",
-    message: `موعد تسليم المهمة "${taskTitle}" بعد ${daysRemaining} ${daysRemaining === 1 ? "يوم" : "أيام"}`,
+    title: t("deadlineSoon"),
+    message: ` ${t("deadlineSoon")}: ${taskTitle} ${t("after")} ${daysRemaining} ${daysRemaining === 1 ? t("day") : t("days")}`,
     type: "warning",
     link: "/student/tasks",
     priority: "high",
@@ -113,7 +116,7 @@ export async function notifyDeadlineApproaching(studentId: string, taskTitle: st
 export async function notifyNewMessage(userId: string, senderName: string, preview: string) {
   await createNotification({
     userId: userId,
-    title: `رسالة جديدة من ${senderName}`,
+    title: ` ${t("newMessageFrom")} ${senderName}`,
     message: preview,
     type: "message",
     link: "/student/messages",
@@ -125,8 +128,8 @@ export async function notifyNewMessage(userId: string, senderName: string, previ
 export async function notifyProjectAssigned(supervisorId: string, projectTitle: string, studentName: string) {
   await createNotification({
     userId: supervisorId,
-    title: "مشروع جديد تم تعيينه",
-    message: `تم تعيينك كمشرف على مشروع "${projectTitle}" للطالب ${studentName}`,
+    title: t("newProjectIsAssigned"),
+    message: ` ${t("youAreSupervisorOf")} "${projectTitle}" ${t("forStudent")} ${studentName}`,
     type: "project",
     link: "/supervisor/projects",
     priority: "high",
@@ -140,8 +143,8 @@ export async function notifyBulkTaskDeadlines(
   await createBatchNotifications(
     notifications.map((n) => ({
       userId: n.studentId,
-      title: "تذكير: موعد التسليم قريب",
-      message: `موعد تسليم المهمة "${n.taskTitle}" بعد ${n.daysRemaining} ${n.daysRemaining === 1 ? "يوم" : "أيام"}`,
+      title: t("deadlineSoon"),
+      message: ` ${t("deadlineSoon")}: ${n.taskTitle} ${t("after")} ${n.daysRemaining} ${n.daysRemaining === 1 ? t("day") : t("days")}`,
       type: "warning",
       link: "/student/tasks",
       priority: "high",
