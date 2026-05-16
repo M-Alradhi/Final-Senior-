@@ -30,7 +30,7 @@ import type { Department } from "@/lib/types"
 
 export default function DepartmentsPage() {
   const { userData } = useAuth()
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
     const [stats, setStats] = useState({
       totalProjects: 0,
       activeProjects: 0,
@@ -199,7 +199,7 @@ export default function DepartmentsPage() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <CardTitle className="flex items-center gap-2">
-                        {dept.nameAr}
+                        {language === "ar" ? dept.nameAr : dept.nameEn}
                         {dept.isActive ? (
                           <Badge variant="default" className="rounded-lg">
                             {t("active")}
@@ -210,7 +210,7 @@ export default function DepartmentsPage() {
                           </Badge>
                         )}
                       </CardTitle>
-                      <CardDescription className="mt-1">{dept.nameEn}</CardDescription>
+                      <CardDescription className="mt-1">{language === "ar" ? dept.nameEn : dept.nameAr}</CardDescription>
                     </div>
                   </div>
                 </CardHeader>

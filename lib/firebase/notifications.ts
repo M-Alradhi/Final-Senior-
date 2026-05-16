@@ -18,7 +18,9 @@ export interface Notification {
   id?: string
   userId: string
   title: string
+  titleEn?: string // English title for bilingual support
   message: string
+  messageEn?: string // English message for bilingual support
   type: "info" | "success" | "warning" | "error" | "evaluation" | "task" | "meeting" | "project" | "message"
   read: boolean
   createdAt: any
@@ -33,7 +35,9 @@ const activeSubscriptions = new Map<string, Unsubscribe>()
 export async function createNotification(params: {
   userId: string
   title: string
+  titleEn?: string
   message: string
+  messageEn?: string
   type?: "info" | "success" | "warning" | "error" | "evaluation" | "task" | "meeting" | "project" | "message"
   link?: string
   priority?: "low" | "medium" | "high"
@@ -52,6 +56,8 @@ export async function createNotification(params: {
       createdAt: serverTimestamp(),
     }
 
+    if (params.titleEn) notificationData.titleEn = params.titleEn
+    if (params.messageEn) notificationData.messageEn = params.messageEn
     if (params.link) {
       notificationData.link = params.link
     }
@@ -202,7 +208,9 @@ export async function createBatchNotifications(
   notifications: Array<{
     userId: string
     title: string
+    titleEn?: string
     message: string
+    messageEn?: string
     type?: "info" | "success" | "warning" | "error" | "evaluation" | "task" | "meeting" | "project" | "message"
     link?: string
     priority?: "low" | "medium" | "high"
@@ -222,6 +230,8 @@ export async function createBatchNotifications(
         createdAt: serverTimestamp(),
       }
 
+      if (params.titleEn) notificationData.titleEn = params.titleEn
+      if (params.messageEn) notificationData.messageEn = params.messageEn
       if (params.link) notificationData.link = params.link
       if (params.category) notificationData.category = params.category
 

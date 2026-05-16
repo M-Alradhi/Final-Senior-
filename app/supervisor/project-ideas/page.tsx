@@ -265,26 +265,30 @@ export default function SupervisorProjectIdeas() {
     try {
       if (!ts) return t("notSet")
       const d = ts?.toDate?.() ? ts.toDate() : new Date(ts)
-      return d.toLocaleDateString("ar-EG")
+      return d.toLocaleDateString(language === "ar" ? "ar-EG" : "en-US")
     } catch {
       return t("notSet")
     }
   }
 
   const getDepartmentLabel = (project: AnyDoc) => {
-    
-    if (project.departmentNameAr || project.departmentNameEn) return project.departmentNameAr || project.departmentNameEn
-
-    
-    const depId = project.departmentId || project.department
-    const dep = departments.find((d) => d.id === depId)
-    if (dep) return dep.nameAr || dep.name || dep.nameEn
-
-    
-    const depCode = project.departmentCode || project.department
-    const dep2 = departments.find((d) => d.code === depCode || d.departmentCode === depCode)
-    if (dep2) return dep2.nameAr || dep2.name || dep2.nameEn
-
+    if (language === "ar") {
+      if (project.departmentNameAr || project.departmentNameEn) return project.departmentNameAr || project.departmentNameEn
+      const depId = project.departmentId || project.department
+      const dep = departments.find((d) => d.id === depId)
+      if (dep) return dep.nameAr || dep.name || dep.nameEn
+      const depCode = project.departmentCode || project.department
+      const dep2 = departments.find((d) => d.code === depCode || d.departmentCode === depCode)
+      if (dep2) return dep2.nameAr || dep2.name || dep2.nameEn
+    } else {
+      if (project.departmentNameEn || project.departmentNameAr) return project.departmentNameEn || project.departmentNameAr
+      const depId = project.departmentId || project.department
+      const dep = departments.find((d) => d.id === depId)
+      if (dep) return dep.nameEn || dep.nameAr || dep.name
+      const depCode = project.departmentCode || project.department
+      const dep2 = departments.find((d) => d.code === depCode || d.departmentCode === depCode)
+      if (dep2) return dep2.nameEn || dep2.nameAr || dep2.name
+    }
     return t("notSet")
   }
 
@@ -620,7 +624,7 @@ export default function SupervisorProjectIdeas() {
                   <SelectContent className="rounded-lg">
                     {departments.map((dep) => (
                       <SelectItem key={dep.id} value={dep.id}>
-                        {dep.nameAr || dep.name || dep.nameEn} {dep.code ? `(${dep.code})` : ""}
+                        {language === "ar" ? (dep.nameAr || dep.name || dep.nameEn) : (dep.nameEn || dep.nameAr || dep.name)} {dep.code ? `(${dep.code})` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -687,7 +691,7 @@ export default function SupervisorProjectIdeas() {
                   <SelectTrigger className="rounded-lg"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {departments.map((dep) => (
-                      <SelectItem key={dep.id} value={dep.id}>{dep.nameAr || dep.name || dep.nameEn}</SelectItem>
+                      <SelectItem key={dep.id} value={dep.id}>{language === "ar" ? (dep.nameAr || dep.name || dep.nameEn) : (dep.nameEn || dep.nameAr || dep.name)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
