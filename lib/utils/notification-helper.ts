@@ -1,7 +1,7 @@
 import { createNotification, createBatchNotifications } from "@/lib/firebase/notifications"
 import { collection, query, where, getDocs } from "firebase/firestore"
 import { getFirebaseDb } from "@/lib/firebase/config"
-import { translations } from "@/lib/translations"
+import { translations } from "@/lib/contexts/language-context"
 
 const t = (key: string) => translations.ar[key] || key
 
